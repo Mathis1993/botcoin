@@ -1,0 +1,22 @@
+{
+    "api_key": "API_KEY",
+    "secret_key": "SECRET_KEY",
+    "passphrase": "PASSPHRASE",
+    "is_demo_trading": true,
+    "trading_pairs": [
+        {
+            "symbol": "SBTCSUSDT",
+            "buy_percent": 1.0,
+            "sell_percent": 1.5,
+            "order_amount": 100.0,
+            "max_orders": 3
+        },
+        {
+            "symbol": "SETHSUSDT",
+            "buy_percent": 1.2,
+            "sell_percent": 1.8,
+            "order_amount": 50.0,
+            "max_orders": 2
+        }
+    ]
+}

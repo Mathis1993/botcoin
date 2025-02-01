@@ -1,0 +1,6 @@
+.idea
+*.env
+config.json
+tmp/
+.DS_Store
+.docker
