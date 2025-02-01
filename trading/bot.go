@@ -126,11 +126,9 @@ func (b *Bot) Start() error {
 	b.isRunning = true
 	b.mu.Unlock()
 
-	// Subscribe to order updates for all trading pairs
-	if err := b.ws.Subscribe(b.handleOrderUpdate); err != nil {
-		return fmt.Errorf("failed to request to subscribe to order updates for: %w", err)
-	}
-	log.Print("requested to subscribe to order updates")
+	// Register handler dealing with order updates for all trading pairs
+	b.ws.RegisterHandler(b.handleOrderUpdate)
+	log.Println("Registered order update handler")
 
 	// Start trading for all pairs
 	for symbol, pair := range b.tradingPairs {
@@ -255,7 +253,7 @@ func (b *Bot) handleSingleOrderUpdate(order *Order) {
 	}
 
 	if !exists && order.Side == "buy" {
-		log.Printf("Order with id %s, status %s and side %s is not in actie orders", order.OrderId, order.Status, order.Side)
+		log.Printf("Order with id %s, status %s and side %s is not in active orders", order.OrderId, order.Status, order.Side)
 	}
 
 	// Handle filled sell orders
