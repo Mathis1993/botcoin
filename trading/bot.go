@@ -205,7 +205,6 @@ func (b *Bot) handleSingleOrderUpdate(order *api.Order) {
 		log.Printf("Received order update for unknown symbol: %s", order.InstId)
 		return
 	}
-	log.Print("Found trading process")
 
 	process.mu.Lock()
 	defer process.mu.Unlock()
@@ -222,7 +221,7 @@ func (b *Bot) handleSingleOrderUpdate(order *api.Order) {
 		return
 	}
 	if order.Status == "filled" && order.Side == "buy" {
-		log.Printf("Buy order filled, getting current position for %s", order.InstId)
+		log.Print("Buy order filled, waiting shortly to ensure the position is updated...")
 		time.Sleep(3 * time.Second) // Wait for position to be updated
 		position, err := b.client.GetPosition(order.InstId)
 		if err != nil || position == nil {
@@ -230,12 +229,13 @@ func (b *Bot) handleSingleOrderUpdate(order *api.Order) {
 			return
 		}
 		if previousSellOrder := process.SellOrder; previousSellOrder != nil {
-			log.Printf("Attempting to cancel existing sell order %s for %s (price: %2.f, amount: %2.f)", previousSellOrder.OrderId, order.InstId, previousSellOrder.CoinPrice, previousSellOrder.OrderAmount)
+			log.Printf("Attempting to cancel existing sell order %s for %s (price: %2.f)", previousSellOrder.OrderId, order.InstId, previousSellOrder.CoinPrice)
 			err := b.client.CancelOrder(order.InstId, previousSellOrder.OrderId)
 			if err != nil {
 				log.Printf("Failed to cancel previous sell order: %v", err)
 				return
 			}
+			log.Print("Successfully cancelled previous sell order")
 		}
 		avgPrice, err := strconv.ParseFloat(position.OpenPriceAvg, 64)
 		if err != nil {

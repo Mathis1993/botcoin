@@ -343,8 +343,6 @@ func (c *WebsocketClient) readLoop() {
 				continue
 			}
 
-			log.Printf("Received message: %s", string(message))
-
 			if handler, ok := c.handlers["default"]; ok {
 				handler(msg.Data)
 			}
