@@ -316,9 +316,19 @@ func (c *WebsocketClient) readLoop() {
 				continue
 			}
 
+			if msg.Event == "error" && msg.Code == 30006 && strings.Contains(msg.Msg, "request too many") {
+				log.Printf("Received error message: %s", string(message))
+				log.Println("This sometimes seems to happen on trying to subscribe to a channel")
+				log.Println("readLoop: calling subscribe (to ensure we are subscribed)")
+				if err := c.subscribe(); err != nil {
+					log.Fatalf("failed to send re-subscribe message: %v", err)
+				}
+				continue
+
+			}
+
 			if msg.Event == "error" {
 				log.Printf("Received error message: %s", string(message))
-				// ToDo(ME-29.01.25): Maybe reconnect for severe errors (what are these?)
 				continue
 			}
 
