@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,42 +15,6 @@ import (
 	"time"
 )
 
-type TickerResponse struct {
-	Code string `json:"code"`
-	Data []struct {
-		Symbol     string `json:"symbol"`
-		LastPrice  string `json:"lastPr"`
-		AskPrice   string `json:"askPr"`
-		BidPrice   string `json:"bidPr"`
-		IndexPrice string `json:"indexPrice"`
-		Open24h    string `json:"open24h"`
-		MarkPrice  string `json:"markPrice"`
-	} `json:"data"`
-	Msg string `json:"msg"`
-}
-
-type OrderRequest struct {
-	Symbol      string `json:"symbol"`
-	ProductType string `json:"productType"`
-	MarginMode  string `json:"marginMode"`
-	MarginCoin  string `json:"marginCoin"`
-	Size        string `json:"size"`
-	Price       string `json:"price"`
-	Side        string `json:"side"`
-	TradeSide   string `json:"tradeSide"`
-	OrderType   string `json:"orderType"`
-	Force       string `json:"force"`
-	ReduceOnly  string `json:"reduceOnly"`
-}
-
-type OrderResponse struct {
-	Code string `json:"code"`
-	Data struct {
-		OrderId string `json:"orderId"`
-	} `json:"data"`
-	Msg string `json:"msg"`
-}
-
 const (
 	baseURL = "https://api.bitget.com"
 	apiPath = "/api/v2/mix"
@@ -57,6 +22,8 @@ const (
 	wsEndpoint             = "wss://ws.bitget.com/v2/ws/private"
 	productTypeDemoFutures = "susdt-futures"
 	productTypeLiveFutures = "usdt-futures"
+	marginCoinDemo         = "SUSDT"
+	marginCoinLive         = "USDT"
 )
 
 // validateSymbol checks if the symbol format matches the trading mode
@@ -79,6 +46,13 @@ func (c *Client) getProductType() string {
 		return productTypeDemoFutures
 	}
 	return productTypeLiveFutures
+}
+
+func (c *Client) getMarginCoin() string {
+	if c.isDemoTrading {
+		return marginCoinDemo
+	}
+	return marginCoinLive
 }
 
 type Client struct {
@@ -191,17 +165,43 @@ func (c *Client) GetCurrentPrice(symbol string) (float64, error) {
 	return price, nil
 }
 
+func (c *Client) GetPosition(symbol string) (*Position, error) {
+	if err := c.validateSymbol(symbol); err != nil {
+		return nil, err
+	}
+
+	productType := c.getProductType()
+	marginCoin := c.getMarginCoin()
+
+	path := fmt.Sprintf("/position/single-position?symbol=%s&productType=%s&marginCoin=%s", symbol, productType, marginCoin)
+	respBody, err := c.doRequest("GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var positionResp PositionResponse
+	if err := json.Unmarshal(respBody, &positionResp); err != nil {
+		return nil, err
+	}
+
+	if positionResp.Code != "00000" {
+		return nil, fmt.Errorf("order placement failed: %s", positionResp.Msg)
+	}
+
+	if len(positionResp.Data) > 0 {
+		return &positionResp.Data[0], nil
+	}
+
+	return nil, errors.New("no position data available")
+}
+
 func (c *Client) PlaceLimitOrder(symbol string, side string, price float64, size float64) (string, error) {
 	if err := c.validateSymbol(symbol); err != nil {
 		return "", err
 	}
 
 	productType := c.getProductType()
-	marginCoin := "USDT"
-	if c.isDemoTrading {
-		productType = "susdt-futures"
-		marginCoin = "SUSDT"
-	}
+	marginCoin := c.getMarginCoin()
 
 	orderReq := OrderRequest{
 		Symbol:      symbol,
@@ -211,10 +211,11 @@ func (c *Client) PlaceLimitOrder(symbol string, side string, price float64, size
 		Size:        strconv.FormatFloat(size, 'f', 8, 64),
 		Price:       strconv.FormatFloat(price, 'f', 1, 64),
 		Side:        side,
-		TradeSide:   "open",
-		OrderType:   "limit",
-		Force:       "gtc",
-		ReduceOnly:  "NO",
+		// ToDo(ME-01.02.25): Use in hedge mode
+		//TradeSide:   "open",
+		OrderType:  "limit",
+		Force:      "gtc",
+		ReduceOnly: "NO",
 	}
 
 	respBody, err := c.doRequest("POST", "/order/place-order", orderReq)
@@ -239,22 +240,29 @@ func (c *Client) CancelOrder(symbol string, orderId string) error {
 		return err
 	}
 
-	path := fmt.Sprintf("/order/cancel-order?symbol=%s&orderId=%s", symbol, orderId)
-	respBody, err := c.doRequest("POST", path, nil)
+	cancelOrderReq := CancelOrderRequest{
+		Symbol:      symbol,
+		ProductType: c.getProductType(),
+		MarginCoin:  c.getMarginCoin(),
+		OrderID:     orderId,
+	}
+	path := fmt.Sprintf("/order/cancel-order")
+	respBody, err := c.doRequest("POST", path, cancelOrderReq)
 	if err != nil {
 		return err
 	}
 
-	var resp struct {
-		Code string `json:"code"`
-		Msg  string `json:"msg"`
-	}
-	if err := json.Unmarshal(respBody, &resp); err != nil {
+	cancelOrderResp := CancelOrderResponse{}
+	if err := json.Unmarshal(respBody, &cancelOrderResp); err != nil {
 		return err
 	}
 
-	if resp.Code != "00000" {
-		return fmt.Errorf("order cancellation failed: %s", resp.Msg)
+	if cancelOrderResp.Code != "00000" {
+		return fmt.Errorf("order cancellation failed: %s", cancelOrderResp.Msg)
+	}
+
+	if cancelOrderResp.Data.OrderID != orderId {
+		return fmt.Errorf("order cancellation failed: order ID mismatch, expected %s, got %s", orderId, cancelOrderResp.Data.OrderID)
 	}
 
 	return nil

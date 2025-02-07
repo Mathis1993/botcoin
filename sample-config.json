@@ -3,20 +3,42 @@
     "secret_key": "SECRET_KEY",
     "passphrase": "PASSPHRASE",
     "is_demo_trading": true,
-    "trading_pairs": [
+    "trading_processes": [
         {
             "symbol": "SBTCSUSDT",
-            "buy_percent": 1.0,
-            "sell_percent": 1.5,
-            "order_amount": 100.0,
-            "max_orders": 3
+            "sell_target_percent": 5,
+            "buy_orders": [
+                {
+                    "coin_price_below_percent": 0.05,
+                    "order_amount": 500
+                },
+                {
+                    "coin_price_below_percent": 1,
+                    "order_amount": 600
+                },
+                {
+                    "coin_price_below_percent": 1.5,
+                    "order_amount": 800
+                }
+            ]
         },
         {
             "symbol": "SETHSUSDT",
-            "buy_percent": 1.2,
-            "sell_percent": 1.8,
-            "order_amount": 50.0,
-            "max_orders": 2
+            "sell_target_percent": 5,
+            "buy_orders": [
+                {
+                    "coin_price": 2500,
+                    "order_amount": 500
+                },
+                {
+                    "coin_price": 2300,
+                    "order_amount": 1000
+                },
+                {
+                    "coin_price": 2200,
+                    "order_amount": 1200
+                }
+            ]
         }
     ]
 }
