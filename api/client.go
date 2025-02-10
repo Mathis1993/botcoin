@@ -195,6 +195,49 @@ func (c *Client) GetPosition(symbol string) (*Position, error) {
 	return nil, errors.New("no position data available")
 }
 
+func (c *Client) GetAllPositions() ([]Position, error) {
+	productType := c.getProductType()
+	marginCoin := c.getMarginCoin()
+
+	path := fmt.Sprintf("/position/all-position?productType=%s&marginCoin=%s", productType, marginCoin)
+	respBody, err := c.doRequest("GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var positionResp PositionResponse
+	if err := json.Unmarshal(respBody, &positionResp); err != nil {
+		return nil, err
+	}
+
+	if positionResp.Code != "00000" {
+		return nil, fmt.Errorf("order placement failed: %s", positionResp.Msg)
+	}
+
+	return positionResp.Data, nil
+}
+
+func (c *Client) GetPendingOrders(symbol string) ([]Order, error) {
+	if err := c.validateSymbol(symbol); err != nil {
+		return nil, err
+	}
+
+	productType := c.getProductType()
+
+	path := fmt.Sprintf("/order/orders-pending?symbol=%s&productType=%s", symbol, productType)
+	respBody, err := c.doRequest("GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var ordersListResponse OrderListResponse
+	if err := json.Unmarshal(respBody, &ordersListResponse); err != nil {
+		return nil, err
+	}
+
+	return ordersListResponse.Data.EntrustedList, nil
+}
+
 func (c *Client) PlaceLimitOrder(symbol string, side string, price float64, size float64) (string, error) {
 	if err := c.validateSymbol(symbol); err != nil {
 		return "", err

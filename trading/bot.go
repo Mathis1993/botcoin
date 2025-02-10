@@ -68,54 +68,119 @@ func NewBot(cfg *config.Config) (*Bot, error) {
 		tradingProcesses: make(map[string]*TradingProcess),
 	}
 
-	// Initialize trading processes
-	// ToDo(ME-07.02.25): Sync bot state with bitget state
-	// for each trading process
-	// create trading process object
-	// get all orders for symbol
-	// append all buy orders
-	// check for position and sell order -> potentially create new sell order
-	// if any order appended, set alreadyInitialized to true
-
-	// for each trading process
-	// tradingProcess := b.fetchCurrentTradingProcess(symbol)
-	// if tradingProcess.alreadyInitialized
-	// b.tradingProcesses[symbol] = tradingProcess
-	// continue
-	// regular initialization
-
-	// https://www.bitget.com/api-doc/contract/trade/Get-Orders-Pending
 	for _, tradingProcessConfig := range cfg.TradingProcesses {
-		tradingProcess := &TradingProcess{
-			Symbol:            tradingProcessConfig.Symbol,
-			SellTargetPercent: tradingProcessConfig.SellTargetPercent,
+		var tradingProcess *TradingProcess
+		var alreadyInitialized bool
+		tradingProcess, alreadyInitialized, err = bot.syncCurrentTradingProcess(&tradingProcessConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to sync trading process for %s: %w", tradingProcessConfig.Symbol, err)
 		}
-		for _, buyOrderConfig := range tradingProcessConfig.BuyOrders {
-			coinPrice := buyOrderConfig.CoinPrice
-			if buyOrderConfig.CoinPriceBelowPercent > 0 {
-				// Get current price for symbol
-				currentPrice, err := client.GetCurrentPrice(tradingProcess.Symbol)
-				if err != nil {
-					return nil, fmt.Errorf("failed to get current price for %s: %w", tradingProcess.Symbol, err)
-				}
-				coinPrice = currentPrice * (1 - buyOrderConfig.CoinPriceBelowPercent/100)
-			}
-			tradingProcess.BuyOrders = append(tradingProcess.BuyOrders, BuyOrder{
-				CoinPrice:   coinPrice,
-				OrderAmount: buyOrderConfig.OrderAmount,
-			})
+		if alreadyInitialized {
+			bot.tradingProcesses[tradingProcessConfig.Symbol] = tradingProcess
+			continue
 		}
-		bot.tradingProcesses[tradingProcess.Symbol] = tradingProcess
+		tradingProcess, err = bot.initializeNewTradingProcess(&tradingProcessConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize trading process for %s: %w", tradingProcessConfig.Symbol, err)
+		}
+		bot.tradingProcesses[tradingProcessConfig.Symbol] = tradingProcess
 	}
 
 	return bot, nil
+}
+
+func (b *Bot) syncCurrentTradingProcess(tradingProcessConfig *config.TradingProcessConfig) (*TradingProcess, bool, error) {
+	allOrders, err := b.client.GetPendingOrders(tradingProcessConfig.Symbol)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to get all orders: %w", err)
+	}
+	if allOrders == nil || len(allOrders) == 0 {
+		log.Printf("no existing orders found for %s", tradingProcessConfig.Symbol)
+		return nil, false, nil
+	}
+	var buyOrders []BuyOrder
+	var sellOrder *SellOrder
+	for _, order := range allOrders {
+		if order.Side == "buy" {
+			price, err := strconv.ParseFloat(order.Price, 64)
+			if err != nil {
+				return nil, false, fmt.Errorf("failed to parse order price: %w", err)
+			}
+			size, err := strconv.ParseFloat(order.Size, 64)
+			if err != nil {
+				return nil, false, fmt.Errorf("failed to parse order size: %w", err)
+			}
+			buyOrders = append(buyOrders, BuyOrder{
+				OrderId:     order.OrderId,
+				CoinPrice:   price,
+				OrderAmount: size,
+			})
+		}
+		if order.Side == "sell" {
+			price, err := strconv.ParseFloat(order.Price, 64)
+			if err != nil {
+				return nil, false, fmt.Errorf("failed to parse order price: %w", err)
+			}
+			size, err := strconv.ParseFloat(order.Size, 64)
+			if err != nil {
+				return nil, false, fmt.Errorf("failed to parse order size: %w", err)
+			}
+			sellOrder = &SellOrder{
+				OrderId:     order.OrderId,
+				CoinPrice:   price,
+				OrderAmount: size,
+			}
+		}
+	}
+
+	// extra guard just to be safe
+	if len(buyOrders) == 0 && sellOrder == nil {
+		log.Print("Got orders from api but neither buy nor sell orders found")
+		return nil, false, nil
+	}
+
+	tradingProcess := &TradingProcess{
+		alreadyInitialized: true,
+		Symbol:             tradingProcessConfig.Symbol,
+		SellTargetPercent:  tradingProcessConfig.SellTargetPercent,
+		BuyOrders:          buyOrders,
+		SellOrder:          sellOrder,
+	}
+
+	log.Printf("Synced existing trading process for %s", tradingProcess.Symbol)
+
+	return tradingProcess, true, nil
+}
+
+func (b *Bot) initializeNewTradingProcess(tradingProcessConfig *config.TradingProcessConfig) (*TradingProcess, error) {
+	log.Printf("Initializing new trading process for %s", tradingProcessConfig.Symbol)
+	tradingProcess := &TradingProcess{
+		Symbol:            tradingProcessConfig.Symbol,
+		SellTargetPercent: tradingProcessConfig.SellTargetPercent,
+	}
+	for _, buyOrderConfig := range tradingProcessConfig.BuyOrders {
+		coinPrice := buyOrderConfig.CoinPrice
+		if buyOrderConfig.CoinPriceBelowPercent > 0 {
+			// Get current price for symbol
+			currentPrice, err := b.client.GetCurrentPrice(tradingProcess.Symbol)
+			if err != nil {
+				return nil, fmt.Errorf("Failed to get current price for %s: %w", tradingProcess.Symbol, err)
+			}
+			coinPrice = currentPrice * (1 - buyOrderConfig.CoinPriceBelowPercent/100)
+		}
+		tradingProcess.BuyOrders = append(tradingProcess.BuyOrders, BuyOrder{
+			CoinPrice:   coinPrice,
+			OrderAmount: buyOrderConfig.OrderAmount,
+		})
+	}
+	return tradingProcess, nil
 }
 
 func (b *Bot) Start() error {
 	b.mu.Lock()
 	if b.isRunning {
 		b.mu.Unlock()
-		return fmt.Errorf("bot is already running")
+		return fmt.Errorf("Bot is already running")
 	}
 	b.isRunning = true
 	b.mu.Unlock()
@@ -131,19 +196,11 @@ func (b *Bot) Start() error {
 			continue
 		}
 		if err := b.placeBuyOrders(symbol, process); err != nil {
-			log.Printf("failed to place initial buy order for %s: %v", symbol, err)
+			log.Printf("Failed to place initial buy order for %s: %v", symbol, err)
 		}
 	}
 
 	return nil
-}
-
-func (b *Bot) GetPosition() {
-	position, err := b.client.GetPosition("SBTCSUSDT")
-	if err != nil || position == nil {
-		log.Printf("Failed to get position: %v", err)
-		return
-	}
 }
 
 func (b *Bot) Stop() error {

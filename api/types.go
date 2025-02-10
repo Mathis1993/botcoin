@@ -108,6 +108,15 @@ type OrderResponse struct {
 	Msg string `json:"msg"`
 }
 
+type OrderListResponse struct {
+	Code string `json:"code"`
+	Data struct {
+		EntrustedList []Order `json:"entrustedList"`
+		EndId         string  `json:"endId"`
+	}
+	Msg string `json:"msg"`
+}
+
 type PositionResponse struct {
 	Code string     `json:"code"`
 	Data []Position `json:"data"`
