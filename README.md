@@ -1,6 +1,6 @@
 # Botcoin
 
-An automated trading bot for cryptocurrency futures using the Bitget API. The bot implements a parallel trading strategy:
+An automated trading bot for cryptocurrency futures using the Bitget API running in the terminal. The bot implements a parallel trading strategy:
 1. Monitors multiple cryptocurrency pairs simultaneously
 2. For each pair, maintains multiple concurrent orders (configurable)
 3. Places limit buy orders at X% below current price
